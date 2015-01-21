@@ -1,90 +1,31 @@
 #!/usr/bin/nodejs
 //
-// mqtt publish sample for OMRON HVC-C1B
-//
-// HVC-C1B serial protocol
-//   http://plus-sensing.omron.co.jp/product/files/HVC-C1B_%E3%82%B3%E3%83%9E%E3%83%B3%E3%83%88%E3%82%99%E4%BB%95%E6%A7%98%E6%9B%B8_A.pdf
+// sample program for OMRON HVC-C1B (using express version...)
 //
 // how to use
 //   $ sudo apt-get install bluetooth bluez-utils libbluetooth-dev
 //   $ npm install noble
 //   $ npm install lodash
-//   $ npm install mqtt
-//   $ npm install confy
-//   $ sudo EDITOR=vim ~/node_modules/confy/bin/confy set mqtt_hvcc_pub
-//
-//       {
-//         "host": "mqtt.example.com",
-//         "port": 1883,
-//         "username": "username",
-//         "password": "password",
-//         "topic": "publish_topic"
-//       }
-//       
-//   $ sudo nodejs mqtt_hvcc_pub
-//
+//   $ npm install express
+//   $ npm install my-local-ip
+//   $ sudo nodejs express-json.js
+//   
 
 var noble = require('noble');
-var _ = require('lodash');
-var mqtt = require ('mqtt');
+var _ = require('lodash')
 
-var confy = require('confy')
-var config;
-confy.get('mqtt_hvcc_pub', {require:{
-	host     : 'mqtt.example.com',
-	port     : 1883,
-	username : 'username',
-	password : 'password',
-	topic    : 'topic'
-}}, function(err, result) {
-	config = result;
+// express
+var port = 8080;
+var result_json_str = "";
+var express = require('express');
+var app = express();
+app.get('/', function(req, res) {
+	res.header('Content-Type', 'application/json');
+	res.send(result_json_str);
 });
-
-var client = mqtt.createClient(config.port, config.host, {
-		username: config.username,
-		password: config.password
-	});
-
-function publish_result(result) {
-	console.log("publish_result() : topic=" + config.topic);
-
-	if (result == null || result.face.length == 0) {
-		client.publish(config.topic, JSON.stringify({'detect_face_num' : 0}));
-		return;
-	}
-
-	var face = result.face[0];
-
-	var h = {detect_face_num:result.face.length}
-
-	h.x              = face.x;
-	h.y              = face.y;
-	h.size           = face.size;
-	h.confidence     = face.confidence;
-
-	h.dir_yaw        = face.dir.yaw;
-	h.dir_pitch      = face.dir.pitch;
-	h.dir_roll       = face.dir.roll;
-	h.dir_confidence = face.dir.confidence;
-
-	h.age_age        = face.age.age;
-	h.age_confidence = face.age.confidence;
-
-	h.gen_gender     = face.gen.gender;
-	h.gen_confidence = face.gen.confidence;
-
-	h.gaze_gazeLR    = face.gaze.gazeLR;
-	h.gaze_gazeUD    = face.gaze.gazeUD;
-
-	h.blink_ratioL   = face.blink.ratioL
-	h.blink_ratioR   = face.blink.ratioR
-
-	h.exp_expression = face.exp.expression;
-	h.exp_score      = face.exp.score;
-	h.exp_degree     = face.exp.degree;
-	
-	client.publish(config.topic, JSON.stringify(h));
-}
+app.listen(port);
+ip = require('my-local-ip')()
+console.log('start express http server...url=http://' + ip + ':' + port + '/');
 
 var service_uuid = '35100001-d13a-4f39-8ab3-bf64d4fbb4b4'.replace(/\-/g, '');
 var tx_char_uuid    = '35100002-d13a-4f39-8ab3-bf64d4fbb4b4'.replace(/\-/g, '');
@@ -137,12 +78,6 @@ function hvcc_send_cmd(buf) {
 
 function hvcc_version(callback) {
 	on_response = function(response_code, data) {
-		if (data.length < 19) {
-			console.log("hvcc_version() : invalid data.length...");
-			console.log("data.length=" + data.length);
-			console.log("data=" + data.toString('hex'));
-			return;
-		}
 		var str             = data.slice(0, 12).toString();
 		var major_version   = data.slice(12, 13).readUInt8(0);
 		var minor_version   = data.slice(13, 14).readUInt8(0);
@@ -353,11 +288,11 @@ function hccv_execute(callback) {
 function main_loop() {
 	setTimeout(function() {
 		hccv_execute(function(resonse_code, result) {
-			console.log(JSON.stringify(result,null,4));
-			publish_result(result);
+			result_json_str = JSON.stringify(result,null,4);
+			console.log(result_json_str);
 			main_loop();
 		});
-	}, 1000);
+	}, 100);
 }
 
 function start_hvcc() {
@@ -366,6 +301,35 @@ function start_hvcc() {
 
 		hccv_set_camera_orientation(0, function(response_code) {
 			main_loop();
+		});
+	});
+}
+
+function connect_hvcc(peripheral) {
+	var uuid = peripheral.uuid
+
+	peripheral.connect(function(err) {
+		console.log('connect... : uuid=' + uuid);
+
+		peripheral.on('disconnect', function() {
+			console.log('disconnect... : uuid=' + uuid);
+			console.log('start scanning...');
+			on_response = null;
+			result_json_str = "";
+			noble.startScanning([], false);
+		});
+	
+		peripheral.discoverServices([], function(err, services) {
+			service = _.find(services, function(s) {return s.uuid === service_uuid});
+			service.discoverCharacteristics([], function(err,chars) {
+				rx = _.find(chars, function(c) {return c.uuid === rx_char_uuid});
+				tx = _.find(chars, function(c) {return c.uuid === tx_char_uuid});
+	
+				rx.notify(true);
+				rx.on('read', on_read);
+	
+				setTimeout(start_hvcc, 1000);
+			});
 		});
 	});
 }
@@ -379,32 +343,9 @@ noble.on('discover', function(peripheral) {
 
 		console.log('HVC-C is found! uuid=' + uuid + ", localName=" + localName);
 
-		peripheral.connect(function(err) {
-			console.log('connect... : uuid=' + uuid);
-
-			peripheral.on('disconnect', function() {
-				console.log('disconnect... : uuid=' + uuid);
-				console.log('start scanning...');
-				on_response = null;
-				clear_rx_buf();
-				noble.startScanning([], false);
-			});
-
-			setTimeout(function(){
-				peripheral.discoverServices([], function(err, services) {
-					service = _.find(services, function(s) {return s.uuid === service_uuid});
-					service.discoverCharacteristics([], function(err,chars) {
-						rx = _.find(chars, function(c) {return c.uuid === rx_char_uuid});
-						tx = _.find(chars, function(c) {return c.uuid === tx_char_uuid});
-
-						rx.notify(true);
-						rx.on('read', on_read);
-
-						setTimeout(start_hvcc, 1000);
-					});
-				});
-			}, 500);
-		});
+		setTimeout(function() {
+			connect_hvcc(peripheral);
+		}, 1000);
 	}
 });
 

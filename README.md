@@ -37,11 +37,17 @@ $ sudo make install
 $ sudo ln -s /usr/local/bin/node /usr/local/bin/nodejs
 </pre>
 
+nobleを使用しているので、Mac OS Xでも動作するかも？(未確認)
+
+
 how to use
 ----
+Ubuntu 14.04.1 LTS環境でのセットアップ手順。
+
 <pre>
 $ sudo apt-get install nodejs npm
 $ sudo apt-get install bluetooth bluez-utils libbluetooth-dev
+
 $ npm install noble
 $ npm install lodash
 
@@ -131,10 +137,26 @@ hccv_execute() : response_code = 0
 </pre>
 
 注意
-====
+----
+
 execute.jsでは人体検出・手検出を無効に設定しています。
 有効にする場合は、「コマンド仕様書」のP.30を参考に
 実行する機能のビットを1に設定してください。
 
 * 設定箇所
   * ![http://gyazo.com/39293242f706aefaa6ef51f0e0bf6a38.png](http://gyazo.com/39293242f706aefaa6ef51f0e0bf6a38.png)
+
+メモ
+----
+
+OMRON HVC-C1Bは、画像認識モジュール(おそらくHVC-Pと似たモジュール?)と、UARTをBLE化するHRM1017の2つのモジュールで構成されています。
+
+* ![http://i.gyazo.com/994f2b9af1a2bdc6e190720e2762f4c6.png](http://i.gyazo.com/994f2b9af1a2bdc6e190720e2762f4c6.png)
+
+microUSBに電源を接続した直後から本体前面にある緑のLEDが点滅するまでの約2秒間、
+HRM1017が先に起動するためBLEでは接続可能ですが、画像認識モジュールはまだ起動途中であるためコマンドを受け付けないことがあります。
+
+そのためexecute.jsでは、接続してからsetTimeout()で1秒待った後にコマンドを送信するように実装しています。
+
+
+
